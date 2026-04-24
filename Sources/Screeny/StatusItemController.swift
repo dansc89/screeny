@@ -36,16 +36,23 @@ final class StatusItemController {
         NSColor.clear.setFill()
         NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
 
-        let eyeRect = NSRect(x: 2.5, y: 4.0, width: 13.0, height: 10.0)
+        // Keep the mark as a true circle so it doesn't read as a flattened oval.
+        let eyeDiameter: CGFloat = 10.8
+        let eyeRect = NSRect(
+            x: (size.width - eyeDiameter) / 2.0,
+            y: (size.height - eyeDiameter) / 2.0 + 0.1,
+            width: eyeDiameter,
+            height: eyeDiameter
+        )
         let eyePath = NSBezierPath(ovalIn: eyeRect)
-        eyePath.lineWidth = 1.5
+        eyePath.lineWidth = 1.4
         NSColor.labelColor.setStroke()
         eyePath.stroke()
 
-        let pupilSize: CGFloat = 2.6
+        let pupilSize: CGFloat = 2.2
         let pupilRect = NSRect(
             x: (size.width - pupilSize) / 2,
-            y: (size.height - pupilSize) / 2 - 0.2,
+            y: (size.height - pupilSize) / 2,
             width: pupilSize,
             height: pupilSize
         )
