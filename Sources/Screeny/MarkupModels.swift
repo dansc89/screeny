@@ -56,6 +56,14 @@ struct RectangleAnnotation: Identifiable {
     var normalizedLineWidth: CGFloat
 }
 
+struct CircleAnnotation: Identifiable {
+    let id = UUID()
+    var start: NormalizedPoint
+    var end: NormalizedPoint
+    var color: RGBAColor
+    var normalizedLineWidth: CGFloat
+}
+
 struct ArrowAnnotation: Identifiable {
     let id = UUID()
     var start: NormalizedPoint
@@ -67,6 +75,7 @@ struct ArrowAnnotation: Identifiable {
 enum Annotation: Identifiable {
     case stroke(StrokeAnnotation)
     case rectangle(RectangleAnnotation)
+    case circle(CircleAnnotation)
     case arrow(ArrowAnnotation)
 
     var id: UUID {
@@ -75,6 +84,8 @@ enum Annotation: Identifiable {
             return stroke.id
         case .rectangle(let rectangle):
             return rectangle.id
+        case .circle(let circle):
+            return circle.id
         case .arrow(let arrow):
             return arrow.id
         }
@@ -84,6 +95,7 @@ enum Annotation: Identifiable {
 enum MarkupTool: String, CaseIterable, Identifiable {
     case pen
     case rectangle
+    case circle
     case arrow
 
     var id: String { rawValue }
@@ -94,6 +106,8 @@ enum MarkupTool: String, CaseIterable, Identifiable {
             return "Pen"
         case .rectangle:
             return "Rectangle"
+        case .circle:
+            return "Circle"
         case .arrow:
             return "Arrow"
         }
@@ -105,6 +119,8 @@ enum MarkupTool: String, CaseIterable, Identifiable {
             return "pencil.tip"
         case .rectangle:
             return "rectangle"
+        case .circle:
+            return "circle"
         case .arrow:
             return "arrow.up.right"
         }

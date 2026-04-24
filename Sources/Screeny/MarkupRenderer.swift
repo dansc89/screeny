@@ -35,6 +35,8 @@ struct MarkupRenderer {
                 drawStroke(stroke, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
             case .rectangle(let rectangle):
                 drawRectangle(rectangle, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
+            case .circle(let circle):
+                drawCircle(circle, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
             case .arrow(let arrow):
                 drawArrow(arrow, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
             }
@@ -120,6 +122,23 @@ struct MarkupRenderer {
         context.addLine(to: p2)
         context.closePath()
         context.fillPath()
+        context.restoreGState()
+    }
+
+    private static func drawCircle(_ circle: CircleAnnotation, in context: CGContext, width: CGFloat, height: CGFloat, maxDimension: CGFloat) {
+        let start = denormalized(circle.start, width: width, height: height)
+        let end = denormalized(circle.end, width: width, height: height)
+        let rect = CGRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(start.x - end.x),
+            height: abs(start.y - end.y)
+        )
+
+        context.saveGState()
+        context.setStrokeColor(circle.color.nsColor.cgColor)
+        context.setLineWidth(max(1, circle.normalizedLineWidth * maxDimension))
+        context.strokeEllipse(in: rect)
         context.restoreGState()
     }
 

@@ -150,6 +150,19 @@ struct MarkupEditorView: View {
             path.addRect(rect)
             context.stroke(path, with: .color(rectangle.color.swiftUIColor), lineWidth: lineWidth(for: rectangle.normalizedLineWidth, in: imageRect))
 
+        case .circle(let circle):
+            let p1 = denormalized(circle.start, in: imageRect)
+            let p2 = denormalized(circle.end, in: imageRect)
+            let rect = CGRect(
+                x: min(p1.x, p2.x),
+                y: min(p1.y, p2.y),
+                width: abs(p1.x - p2.x),
+                height: abs(p1.y - p2.y)
+            )
+            var path = Path()
+            path.addEllipse(in: rect)
+            context.stroke(path, with: .color(circle.color.swiftUIColor), lineWidth: lineWidth(for: circle.normalizedLineWidth, in: imageRect))
+
         case .arrow(let arrow):
             drawArrow(arrow, in: &context, imageRect: imageRect)
         }
@@ -228,6 +241,8 @@ struct MarkupEditorView: View {
             return "p"
         case .rectangle:
             return "r"
+        case .circle:
+            return "c"
         case .arrow:
             return "a"
         }

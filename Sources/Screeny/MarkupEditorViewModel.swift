@@ -63,6 +63,16 @@ final class MarkupEditorViewModel: ObservableObject {
                     normalizedLineWidth: normalizedLineWidth(for: imageRect)
                 )
             )
+        case .circle:
+            guard let start = activeStartPoint else { return }
+            previewAnnotation = .circle(
+                CircleAnnotation(
+                    start: start,
+                    end: normalized,
+                    color: selectedRGBAColor,
+                    normalizedLineWidth: normalizedLineWidth(for: imageRect)
+                )
+            )
         case .arrow:
             guard let start = activeStartPoint else { return }
             let nextPoint = constrainedPointIfNeeded(normalized, constrainOrthogonal: constrainOrthogonal)
@@ -113,6 +123,20 @@ final class MarkupEditorViewModel: ObservableObject {
             annotations.append(
                 .rectangle(
                     RectangleAnnotation(
+                        start: start,
+                        end: end,
+                        color: selectedRGBAColor,
+                        normalizedLineWidth: normalizedLineWidth(for: imageRect)
+                    )
+                )
+            )
+        case .circle:
+            guard let start = activeStartPoint, !isNearlySame(start, end) else {
+                return
+            }
+            annotations.append(
+                .circle(
+                    CircleAnnotation(
                         start: start,
                         end: end,
                         color: selectedRGBAColor,

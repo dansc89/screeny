@@ -14,6 +14,7 @@ It behaves like the built-in screenshot flow, but always pauses in a fast markup
 - Built-in markup tools before save:
 - Pen
 - Rectangle
+- Circle
 - Arrow
 - `Copy` button for clipboard-only output
 - `Save + Copy` for file output plus clipboard
