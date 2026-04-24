@@ -33,6 +33,7 @@ TMP_DIR="$(mktemp -d)"
 STAGING_DIR="$TMP_DIR/staging"
 BACKGROUND_PATH="$TMP_DIR/background.png"
 APPS_ALIAS_PATH="$TMP_DIR/Applications.alias"
+README_PATH="$TMP_DIR/README - IMPORTANT.txt"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
@@ -41,6 +42,21 @@ trap cleanup EXIT
 mkdir -p "$STAGING_DIR"
 cp -R "$APP_PATH" "$STAGING_DIR/"
 swift Scripts/generate-dmg-background.swift "$BACKGROUND_PATH"
+cat > "$README_PATH" <<'README'
+Screeny Setup (Important)
+=========================
+
+To use Screeny's keyboard shortcuts (Cmd+Shift+3 and Cmd+Shift+4),
+disable the default macOS screenshot shortcuts first.
+
+System Settings > Keyboard > Keyboard Shortcuts > Screenshots
+
+Turn off the macOS defaults for:
+- Save picture of screen as a file
+- Save picture of selected area as a file
+
+Then launch Screeny from Applications and grant Screen Recording permission if prompted.
+README
 
 osascript <<OSA >/dev/null 2>/dev/null || true
 tell application "Finder"
@@ -64,6 +80,7 @@ run_create_dmg() {
     --icon-size 120 \
     --icon "$APP_BASENAME" 210 300 \
     --hide-extension "$APP_BASENAME" \
+    --add-file "README - IMPORTANT.txt" "$README_PATH" 445 300 \
     --add-file "Applications" "$APPS_ALIAS_PATH" 680 300 \
     "$@" \
     "$OUTPUT_DMG" \
