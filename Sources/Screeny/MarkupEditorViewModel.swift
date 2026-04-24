@@ -18,7 +18,7 @@ final class MarkupEditorViewModel: ObservableObject {
         self.baseImage = baseImage
     }
 
-    func handleDragChanged(location: CGPoint, imageRect: CGRect) {
+    func handleDragChanged(location: CGPoint, imageRect: CGRect, constrainOrthogonal: Bool = false) {
         guard let normalized = normalizedPoint(from: location, in: imageRect) else {
             return
         }
@@ -40,7 +40,12 @@ final class MarkupEditorViewModel: ObservableObject {
 
         switch selectedTool {
         case .pen:
-            activeStrokePoints.append(normalized)
+            let nextPoint = constrainedPointIfNeeded(normalized, constrainOrthogonal: constrainOrthogonal)
+            if constrainOrthogonal, let start = activeStartPoint {
+                activeStrokePoints = [start, nextPoint]
+            } else {
+                activeStrokePoints.append(nextPoint)
+            }
             previewAnnotation = .stroke(
                 StrokeAnnotation(
                     points: activeStrokePoints,
@@ -60,10 +65,11 @@ final class MarkupEditorViewModel: ObservableObject {
             )
         case .arrow:
             guard let start = activeStartPoint else { return }
+            let nextPoint = constrainedPointIfNeeded(normalized, constrainOrthogonal: constrainOrthogonal)
             previewAnnotation = .arrow(
                 ArrowAnnotation(
                     start: start,
-                    end: normalized,
+                    end: nextPoint,
                     color: selectedRGBAColor,
                     normalizedLineWidth: normalizedLineWidth(for: imageRect)
                 )
@@ -71,16 +77,17 @@ final class MarkupEditorViewModel: ObservableObject {
         }
     }
 
-    func handleDragEnded(location: CGPoint, imageRect: CGRect) {
+    func handleDragEnded(location: CGPoint, imageRect: CGRect, constrainOrthogonal: Bool = false) {
         defer {
             activeStartPoint = nil
             activeStrokePoints = []
             previewAnnotation = nil
         }
 
-        guard let end = normalizedPoint(from: location, in: imageRect, clamped: true) else {
+        guard let rawEnd = normalizedPoint(from: location, in: imageRect, clamped: true) else {
             return
         }
+        let end = constrainedPointIfNeeded(rawEnd, constrainOrthogonal: constrainOrthogonal)
 
         switch selectedTool {
         case .pen:
@@ -177,5 +184,24 @@ final class MarkupEditorViewModel: ObservableObject {
 
     private func isNearlySame(_ lhs: NormalizedPoint, _ rhs: NormalizedPoint) -> Bool {
         abs(lhs.x - rhs.x) < 0.002 && abs(lhs.y - rhs.y) < 0.002
+    }
+
+    private func constrainedPointIfNeeded(_ point: NormalizedPoint, constrainOrthogonal: Bool) -> NormalizedPoint {
+        guard
+            constrainOrthogonal,
+            let start = activeStartPoint,
+            selectedTool == .pen || selectedTool == .arrow
+        else {
+            return point
+        }
+
+        let deltaX = point.x - start.x
+        let deltaY = point.y - start.y
+
+        if abs(deltaX) >= abs(deltaY) {
+            return NormalizedPoint(x: point.x, y: start.y)
+        }
+
+        return NormalizedPoint(x: start.x, y: point.y)
     }
 }

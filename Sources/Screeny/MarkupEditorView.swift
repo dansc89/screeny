@@ -33,10 +33,18 @@ struct MarkupEditorView: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            viewModel.handleDragChanged(location: value.location, imageRect: imageRect)
+                            viewModel.handleDragChanged(
+                                location: value.location,
+                                imageRect: imageRect,
+                                constrainOrthogonal: isShiftPressed()
+                            )
                         }
                         .onEnded { value in
-                            viewModel.handleDragEnded(location: value.location, imageRect: imageRect)
+                            viewModel.handleDragEnded(
+                                location: value.location,
+                                imageRect: imageRect,
+                                constrainOrthogonal: isShiftPressed()
+                            )
                         }
                 )
             }
@@ -223,5 +231,9 @@ struct MarkupEditorView: View {
         case .arrow:
             return "a"
         }
+    }
+
+    private func isShiftPressed() -> Bool {
+        NSEvent.modifierFlags.contains(.shift)
     }
 }
