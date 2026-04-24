@@ -13,6 +13,7 @@ APP_PATH="$1"
 OUTPUT_DMG="$2"
 VOLUME_NAME="${3:-Screeny}"
 APP_BASENAME="$(basename "$APP_PATH")"
+VOLUME_ICON_PATH="$APP_PATH/Contents/Resources/AppIcon.icns"
 SIGN_IDENTITY="${SCREENY_CODESIGN_IDENTITY:-}"
 
 if [[ -z "$SIGN_IDENTITY" ]]; then
@@ -72,8 +73,14 @@ rm -f "$OUTPUT_DMG"
 mkdir -p "$(dirname "$OUTPUT_DMG")"
 
 run_create_dmg() {
+  local volicon_args=()
+  if [[ -f "$VOLUME_ICON_PATH" ]]; then
+    volicon_args=(--volicon "$VOLUME_ICON_PATH")
+  fi
+
   create-dmg \
     --volname "$VOLUME_NAME" \
+    "${volicon_args[@]}" \
     --window-pos 120 120 \
     --window-size 900 540 \
     --background "$BACKGROUND_PATH" \
