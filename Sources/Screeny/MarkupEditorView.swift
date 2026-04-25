@@ -7,48 +7,98 @@ struct MarkupEditorView: View {
     let onCopyOnly: (NSImage) -> Void
     let onClose: () -> Void
 
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var pinchStartZoomScale: CGFloat = 1.0
+    @State private var isPinching = false
+    @State private var scrollViewReference: NSScrollView?
+    @State private var wheelEventMonitor: Any?
+    @State private var middleMouseDownMonitor: Any?
+    @State private var middleMouseDragMonitor: Any?
+    @State private var middleMouseUpMonitor: Any?
+    @State private var escapeKeyMonitor: Any?
+    @State private var middlePanLastPointInWindow: CGPoint?
+    @State private var didPushMiddlePanCursor = false
+
+    private let minZoomScale: CGFloat = 0.5
+    private let maxZoomScale: CGFloat = 6.0
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
 
             GeometryReader { proxy in
-                let imageRect = aspectFitRect(for: viewModel.baseImage.size, in: proxy.size)
+                let canvasSize = proxy.size
+                let imageRect = aspectFitRect(for: viewModel.baseImage.size, in: canvasSize)
 
-                ZStack {
+                ScrollView([.horizontal, .vertical]) {
                     Color.black.opacity(0.9)
-                        .ignoresSafeArea()
+                        .overlay(alignment: .center) {
+                            ZStack {
+                                Image(nsImage: viewModel.baseImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: canvasSize.width, height: canvasSize.height)
 
-                    Image(nsImage: viewModel.baseImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-
-                    Canvas { context, _ in
-                        drawAnnotations(in: &context, imageRect: imageRect, includePreview: true)
-                    }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
+                                Canvas { context, _ in
+                                    drawAnnotations(in: &context, imageRect: imageRect, includePreview: true)
+                                }
+                                .frame(width: canvasSize.width, height: canvasSize.height)
+                            }
+                            .frame(width: canvasSize.width, height: canvasSize.height)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        viewModel.handleDragChanged(
+                                            location: effectiveCanvasLocation(from: value.location),
+                                            imageRect: imageRect,
+                                            constrainOrthogonal: isShiftPressed()
+                                        )
+                                    }
+                                    .onEnded { value in
+                                        viewModel.handleDragEnded(
+                                            location: effectiveCanvasLocation(from: value.location),
+                                            imageRect: imageRect,
+                                            constrainOrthogonal: isShiftPressed()
+                                        )
+                                    }
+                            )
+                            .simultaneousGesture(
+                                MagnificationGesture()
+                                    .onChanged { magnification in
+                                        if !isPinching {
+                                            pinchStartZoomScale = zoomScale
+                                            isPinching = true
+                                        }
+                                        applyZoom(clampedZoom(pinchStartZoomScale * magnification))
+                                    }
+                                    .onEnded { _ in
+                                        isPinching = false
+                                    }
+                            )
+                        }
+                        .frame(width: canvasSize.width, height: canvasSize.height)
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            viewModel.handleDragChanged(
-                                location: value.location,
-                                imageRect: imageRect,
-                                constrainOrthogonal: isShiftPressed()
-                            )
-                        }
-                        .onEnded { value in
-                            viewModel.handleDragEnded(
-                                location: value.location,
-                                imageRect: imageRect,
-                                constrainOrthogonal: isShiftPressed()
-                            )
-                        }
+                .background(
+                    ScrollViewAccessor { scrollView in
+                        scrollViewReference = scrollView
+                        configureScrollViewForZoom(scrollView)
+                    }
                 )
+                .background(Color.black.opacity(0.9).ignoresSafeArea())
             }
             .frame(minWidth: 820, minHeight: 520)
+        }
+        .onAppear {
+            installWheelZoomMonitorIfNeeded()
+            installMiddleMousePanMonitorsIfNeeded()
+            installEscapeKeyMonitorIfNeeded()
+        }
+        .onDisappear {
+            removeWheelZoomMonitor()
+            removeMiddleMousePanMonitors()
+            removeEscapeKeyMonitor()
         }
     }
 
@@ -91,6 +141,34 @@ struct MarkupEditorView: View {
 
             Button("Clear") {
                 viewModel.clearAll()
+            }
+
+            Divider()
+                .frame(height: 20)
+
+            HStack(spacing: 6) {
+                Button {
+                    zoomOut()
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                }
+                .keyboardShortcut("-", modifiers: [.command])
+
+                Text("\(Int((zoomScale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 52)
+
+                Button {
+                    zoomIn()
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                }
+                .keyboardShortcut("=", modifiers: [.command])
+
+                Button("Fit") {
+                    resetZoom()
+                }
+                .keyboardShortcut("0", modifiers: [.command])
             }
 
             Spacer()
@@ -136,6 +214,16 @@ struct MarkupEditorView: View {
                 path.addLine(to: denormalized(point, in: imageRect))
             }
             context.stroke(path, with: .color(stroke.color.swiftUIColor), style: .init(lineWidth: lineWidth(for: stroke.normalizedLineWidth, in: imageRect), lineCap: .round, lineJoin: .round))
+        case .highlighter(let highlighter):
+            guard highlighter.points.count > 1 else { return }
+            var path = Path()
+            path.move(to: denormalized(highlighter.points[0], in: imageRect))
+            for point in highlighter.points.dropFirst() {
+                path.addLine(to: denormalized(point, in: imageRect))
+            }
+            context.blendMode = .multiply
+            context.stroke(path, with: .color(highlighter.color.swiftUIColor), style: .init(lineWidth: lineWidth(for: highlighter.normalizedLineWidth, in: imageRect), lineCap: .round, lineJoin: .round))
+            context.blendMode = .normal
 
         case .rectangle(let rectangle):
             let p1 = denormalized(rectangle.start, in: imageRect)
@@ -172,15 +260,25 @@ struct MarkupEditorView: View {
         let start = denormalized(arrow.start, in: imageRect)
         let end = denormalized(arrow.end, in: imageRect)
         let width = lineWidth(for: arrow.normalizedLineWidth, in: imageRect)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = hypot(dx, dy)
+        guard length > 0.001 else { return }
+        let unitX = dx / length
+        let unitY = dy / length
+
+        let angle = atan2(dy, dx)
+        let headLength = min(max(14, width * 3), length * 0.9)
+        let headAngle: CGFloat = .pi / 6
+        let shaftEnd = CGPoint(
+            x: end.x - unitX * headLength * 0.82,
+            y: end.y - unitY * headLength * 0.82
+        )
 
         var shaft = Path()
         shaft.move(to: start)
-        shaft.addLine(to: end)
+        shaft.addLine(to: shaftEnd)
         context.stroke(shaft, with: .color(arrow.color.swiftUIColor), style: .init(lineWidth: width, lineCap: .round))
-
-        let angle = atan2(end.y - start.y, end.x - start.x)
-        let headLength = max(14, width * 3)
-        let headAngle: CGFloat = .pi / 6
 
         let p1 = CGPoint(
             x: end.x - headLength * cos(angle - headAngle),
@@ -200,7 +298,9 @@ struct MarkupEditorView: View {
     }
 
     private func lineWidth(for normalized: CGFloat, in imageRect: CGRect) -> CGFloat {
-        max(1, normalized * max(imageRect.width, imageRect.height))
+        let base = normalized * max(imageRect.width, imageRect.height)
+        let magnification = scrollViewReference?.magnification ?? zoomScale
+        return max(1, base * magnification)
     }
 
     private func denormalized(_ point: NormalizedPoint, in imageRect: CGRect) -> CGPoint {
@@ -239,6 +339,8 @@ struct MarkupEditorView: View {
         switch tool {
         case .pen:
             return "p"
+        case .highlighter:
+            return "h"
         case .rectangle:
             return "r"
         case .circle:
@@ -250,5 +352,346 @@ struct MarkupEditorView: View {
 
     private func isShiftPressed() -> Bool {
         NSEvent.modifierFlags.contains(.shift)
+    }
+
+    private func clampedZoom(_ value: CGFloat) -> CGFloat {
+        min(max(value, minZoomScale), maxZoomScale)
+    }
+
+    private func zoomIn() {
+        applyZoom(clampedZoom(zoomScale * 1.2))
+    }
+
+    private func zoomOut() {
+        applyZoom(clampedZoom(zoomScale / 1.2))
+    }
+
+    private func resetZoom() {
+        applyZoom(1.0)
+    }
+
+    private func installWheelZoomMonitorIfNeeded() {
+        guard wheelEventMonitor == nil else {
+            return
+        }
+
+        wheelEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            handleWheelZoomEvent(event)
+        }
+    }
+
+    private func removeWheelZoomMonitor() {
+        guard let monitor = wheelEventMonitor else {
+            return
+        }
+        NSEvent.removeMonitor(monitor)
+        wheelEventMonitor = nil
+    }
+
+    private func installMiddleMousePanMonitorsIfNeeded() {
+        guard middleMouseDownMonitor == nil, middleMouseDragMonitor == nil, middleMouseUpMonitor == nil else {
+            return
+        }
+
+        middleMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { event in
+            handleMiddleMouseDown(event)
+        }
+        middleMouseDragMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDragged) { event in
+            handleMiddleMouseDragged(event)
+        }
+        middleMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp) { event in
+            handleMiddleMouseUp(event)
+        }
+    }
+
+    private func removeMiddleMousePanMonitors() {
+        if let monitor = middleMouseDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            middleMouseDownMonitor = nil
+        }
+        if let monitor = middleMouseDragMonitor {
+            NSEvent.removeMonitor(monitor)
+            middleMouseDragMonitor = nil
+        }
+        if let monitor = middleMouseUpMonitor {
+            NSEvent.removeMonitor(monitor)
+            middleMouseUpMonitor = nil
+        }
+        middlePanLastPointInWindow = nil
+        if didPushMiddlePanCursor {
+            NSCursor.pop()
+            didPushMiddlePanCursor = false
+        }
+    }
+
+    private func handleMiddleMouseDown(_ event: NSEvent) -> NSEvent? {
+        guard event.buttonNumber == 2 else {
+            return event
+        }
+
+        guard
+            let scrollView = resolvedScrollView(for: event),
+            let window = event.window ?? scrollView.window
+        else {
+            return event
+        }
+
+        let pointInWindow = event.locationInWindow
+        guard
+            let hitView = window.contentView?.hitTest(pointInWindow),
+            hitView.isDescendant(of: scrollView) || hitView === scrollView
+        else {
+            return event
+        }
+
+        middlePanLastPointInWindow = pointInWindow
+        if !didPushMiddlePanCursor {
+            NSCursor.closedHand.push()
+            didPushMiddlePanCursor = true
+        }
+        return nil
+    }
+
+    private func handleMiddleMouseDragged(_ event: NSEvent) -> NSEvent? {
+        guard event.buttonNumber == 2 else {
+            return event
+        }
+        guard
+            let lastPoint = middlePanLastPointInWindow,
+            let scrollView = resolvedScrollView(for: event),
+            let clipView = scrollView.contentView as NSClipView?,
+            let documentView = scrollView.documentView
+        else {
+            return event
+        }
+
+        let currentPoint = event.locationInWindow
+        let lastInDocument = documentView.convert(lastPoint, from: nil)
+        let currentInDocument = documentView.convert(currentPoint, from: nil)
+        let dx = currentInDocument.x - lastInDocument.x
+        let dy = currentInDocument.y - lastInDocument.y
+
+        let maxOriginX = max(0, documentView.bounds.width - clipView.bounds.width)
+        let maxOriginY = max(0, documentView.bounds.height - clipView.bounds.height)
+        var nextOrigin = clipView.bounds.origin
+        nextOrigin.x = min(max(0, nextOrigin.x - dx), maxOriginX)
+        nextOrigin.y = min(max(0, nextOrigin.y - dy), maxOriginY)
+
+        clipView.setBoundsOrigin(nextOrigin)
+        scrollView.reflectScrolledClipView(clipView)
+        middlePanLastPointInWindow = currentPoint
+        return nil
+    }
+
+    private func handleMiddleMouseUp(_ event: NSEvent) -> NSEvent? {
+        guard event.buttonNumber == 2 else {
+            return event
+        }
+        middlePanLastPointInWindow = nil
+        if didPushMiddlePanCursor {
+            NSCursor.pop()
+            didPushMiddlePanCursor = false
+        }
+        return nil
+    }
+
+    private func installEscapeKeyMonitorIfNeeded() {
+        guard escapeKeyMonitor == nil else {
+            return
+        }
+
+        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53 else {
+                return event
+            }
+            guard
+                let scrollView = scrollViewReference,
+                let window = scrollView.window,
+                event.window === window || event.window == nil
+            else {
+                return event
+            }
+            onClose()
+            return nil
+        }
+    }
+
+    private func removeEscapeKeyMonitor() {
+        guard let monitor = escapeKeyMonitor else {
+            return
+        }
+        NSEvent.removeMonitor(monitor)
+        escapeKeyMonitor = nil
+    }
+
+    private func handleWheelZoomEvent(_ event: NSEvent) -> NSEvent? {
+        guard let scrollView = resolvedScrollView(for: event) else {
+            return event
+        }
+        configureScrollViewForZoom(scrollView)
+
+        guard let clipView = scrollView.contentView as NSClipView? else {
+            return event
+        }
+
+        guard
+            let documentView = scrollView.documentView,
+            let window = event.window ?? scrollView.window
+        else {
+            return event
+        }
+
+        let pointInWindow: CGPoint
+        if event.window != nil {
+            pointInWindow = event.locationInWindow
+        } else {
+            pointInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        }
+
+        guard
+            let hitView = window.contentView?.hitTest(pointInWindow),
+            hitView.isDescendant(of: scrollView) || hitView === scrollView
+        else {
+            return event
+        }
+
+        let locationInClipBounds = clipView.convert(pointInWindow, from: nil)
+        let anchorInClip = CGPoint(
+            x: locationInClipBounds.x - clipView.bounds.origin.x,
+            y: locationInClipBounds.y - clipView.bounds.origin.y
+        )
+        guard
+            anchorInClip.x >= 0, anchorInClip.x <= clipView.bounds.width,
+            anchorInClip.y >= 0, anchorInClip.y <= clipView.bounds.height
+        else {
+            return event
+        }
+
+        let deltaY = event.scrollingDeltaY
+        let deltaX = event.scrollingDeltaX
+        let delta = abs(deltaY) >= abs(deltaX) ? deltaY : deltaX
+        guard delta != 0 else {
+            return event
+        }
+
+        if event.hasPreciseScrollingDeltas, event.momentumPhase != [] {
+            return nil
+        }
+
+        let magnitude = abs(delta)
+        let zoomStep: CGFloat
+        if event.hasPreciseScrollingDeltas {
+            // Trackpad/precise input: smooth acceleration.
+            zoomStep = pow(1.008, max(1.0, min(80.0, magnitude)))
+        } else {
+            // Mouse wheel notches: slightly stronger per-notch step.
+            zoomStep = pow(1.12, max(1.0, min(8.0, magnitude)))
+        }
+
+        let factor = delta > 0 ? zoomStep : (1.0 / zoomStep)
+        let targetZoom = clampedZoom(zoomScale * factor)
+        guard abs(targetZoom - zoomScale) > 0.0001 else {
+            return nil
+        }
+
+        let anchorInDocument = documentView.convert(pointInWindow, from: nil)
+        applyZoom(targetZoom, centeredAt: anchorInDocument, in: scrollView)
+
+        return nil
+    }
+
+    private func configureScrollViewForZoom(_ scrollView: NSScrollView) {
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = minZoomScale
+        scrollView.maxMagnification = maxZoomScale
+        let target = clampedZoom(zoomScale)
+        if abs(scrollView.magnification - target) > 0.0001 {
+            scrollView.setMagnification(target, centeredAt: centerPointInDocument(for: scrollView))
+        }
+    }
+
+    private func centerPointInDocument(for scrollView: NSScrollView) -> CGPoint {
+        CGPoint(
+            x: scrollView.contentView.bounds.midX,
+            y: scrollView.contentView.bounds.midY
+        )
+    }
+
+    private func applyZoom(_ target: CGFloat, centeredAt anchor: CGPoint? = nil, in scrollViewOverride: NSScrollView? = nil) {
+        let clampedTarget = clampedZoom(target)
+        guard let scrollView = scrollViewOverride ?? scrollViewReference else {
+            zoomScale = clampedTarget
+            return
+        }
+        configureScrollViewForZoom(scrollView)
+        let center = anchor ?? centerPointInDocument(for: scrollView)
+        scrollView.setMagnification(clampedTarget, centeredAt: center)
+        zoomScale = scrollView.magnification
+    }
+
+    private func effectiveCanvasLocation(from gestureLocation: CGPoint) -> CGPoint {
+        guard
+            let scrollView = scrollViewReference,
+            let documentView = scrollView.documentView,
+            let window = scrollView.window
+        else {
+            return gestureLocation
+        }
+
+        let pointInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        return documentView.convert(pointInWindow, from: nil)
+    }
+
+    private func resolvedScrollView(for event: NSEvent) -> NSScrollView? {
+        if let existing = scrollViewReference {
+            return existing
+        }
+
+        guard let window = event.window, let contentView = window.contentView else {
+            return nil
+        }
+
+        if let fallback = firstScrollView(in: contentView) {
+            scrollViewReference = fallback
+            return fallback
+        }
+
+        return nil
+    }
+
+    private func firstScrollView(in root: NSView) -> NSScrollView? {
+        if let scrollView = root as? NSScrollView {
+            return scrollView
+        }
+
+        for subview in root.subviews {
+            if let found = firstScrollView(in: subview) {
+                return found
+            }
+        }
+
+        return nil
+    }
+}
+
+private struct ScrollViewAccessor: NSViewRepresentable {
+    let onResolve: (NSScrollView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            if let scrollView = view.enclosingScrollView {
+                onResolve(scrollView)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let scrollView = nsView.enclosingScrollView {
+                onResolve(scrollView)
+            }
+        }
     }
 }

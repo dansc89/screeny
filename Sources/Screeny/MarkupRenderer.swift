@@ -39,6 +39,8 @@ struct MarkupRenderer {
                 drawCircle(circle, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
             case .arrow(let arrow):
                 drawArrow(arrow, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
+            case .highlighter(let highlighter):
+                drawHighlighter(highlighter, in: context, width: CGFloat(width), height: CGFloat(height), maxDimension: maxDimension)
             }
         }
 
@@ -91,6 +93,12 @@ struct MarkupRenderer {
         let start = denormalized(arrow.start, width: width, height: height)
         let end = denormalized(arrow.end, width: width, height: height)
         let lineWidth = max(1, arrow.normalizedLineWidth * maxDimension)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = hypot(dx, dy)
+        guard length > 0.001 else { return }
+        let unitX = dx / length
+        let unitY = dy / length
 
         context.saveGState()
         context.setStrokeColor(arrow.color.nsColor.cgColor)
@@ -98,14 +106,18 @@ struct MarkupRenderer {
         context.setLineWidth(lineWidth)
         context.setLineCap(.round)
 
+        let angle = atan2(dy, dx)
+        let headLength = min(max(14, lineWidth * 3), length * 0.9)
+        let headAngle: CGFloat = .pi / 6
+        let shaftEnd = CGPoint(
+            x: end.x - unitX * headLength * 0.82,
+            y: end.y - unitY * headLength * 0.82
+        )
+
         context.beginPath()
         context.move(to: start)
-        context.addLine(to: end)
+        context.addLine(to: shaftEnd)
         context.strokePath()
-
-        let angle = atan2(end.y - start.y, end.x - start.x)
-        let headLength = max(14, lineWidth * 3)
-        let headAngle: CGFloat = .pi / 6
 
         let p1 = CGPoint(
             x: end.x - headLength * cos(angle - headAngle),
@@ -139,6 +151,28 @@ struct MarkupRenderer {
         context.setStrokeColor(circle.color.nsColor.cgColor)
         context.setLineWidth(max(1, circle.normalizedLineWidth * maxDimension))
         context.strokeEllipse(in: rect)
+        context.restoreGState()
+    }
+
+    private static func drawHighlighter(_ highlighter: HighlighterAnnotation, in context: CGContext, width: CGFloat, height: CGFloat, maxDimension: CGFloat) {
+        guard highlighter.points.count > 1 else {
+            return
+        }
+
+        context.saveGState()
+        context.setBlendMode(.multiply)
+        context.setStrokeColor(highlighter.color.nsColor.cgColor)
+        context.setLineWidth(max(1, highlighter.normalizedLineWidth * maxDimension))
+        context.setLineJoin(.round)
+        context.setLineCap(.round)
+
+        let first = denormalized(highlighter.points[0], width: width, height: height)
+        context.beginPath()
+        context.move(to: first)
+        for point in highlighter.points.dropFirst() {
+            context.addLine(to: denormalized(point, width: width, height: height))
+        }
+        context.strokePath()
         context.restoreGState()
     }
 

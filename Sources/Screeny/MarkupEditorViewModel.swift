@@ -25,15 +25,25 @@ final class MarkupEditorViewModel: ObservableObject {
 
         if activeStartPoint == nil {
             activeStartPoint = normalized
-            if selectedTool == .pen {
+            if selectedTool == .pen || selectedTool == .highlighter {
                 activeStrokePoints = [normalized]
-                previewAnnotation = .stroke(
-                    StrokeAnnotation(
-                        points: activeStrokePoints,
-                        color: selectedRGBAColor,
-                        normalizedLineWidth: normalizedLineWidth(for: imageRect)
+                if selectedTool == .pen {
+                    previewAnnotation = .stroke(
+                        StrokeAnnotation(
+                            points: activeStrokePoints,
+                            color: selectedRGBAColor,
+                            normalizedLineWidth: normalizedLineWidth(for: imageRect)
+                        )
                     )
-                )
+                } else {
+                    previewAnnotation = .highlighter(
+                        HighlighterAnnotation(
+                            points: activeStrokePoints,
+                            color: highlighterRGBAColor,
+                            normalizedLineWidth: normalizedHighlighterLineWidth(for: imageRect)
+                        )
+                    )
+                }
             }
             return
         }
@@ -51,6 +61,20 @@ final class MarkupEditorViewModel: ObservableObject {
                     points: activeStrokePoints,
                     color: selectedRGBAColor,
                     normalizedLineWidth: normalizedLineWidth(for: imageRect)
+                )
+            )
+        case .highlighter:
+            let nextPoint = constrainedPointIfNeeded(normalized, constrainOrthogonal: constrainOrthogonal)
+            if constrainOrthogonal, let start = activeStartPoint {
+                activeStrokePoints = [start, nextPoint]
+            } else {
+                activeStrokePoints.append(nextPoint)
+            }
+            previewAnnotation = .highlighter(
+                HighlighterAnnotation(
+                    points: activeStrokePoints,
+                    color: highlighterRGBAColor,
+                    normalizedLineWidth: normalizedHighlighterLineWidth(for: imageRect)
                 )
             )
         case .rectangle:
@@ -113,6 +137,22 @@ final class MarkupEditorViewModel: ObservableObject {
                         points: activeStrokePoints,
                         color: selectedRGBAColor,
                         normalizedLineWidth: normalizedLineWidth(for: imageRect)
+                    )
+                )
+            )
+        case .highlighter:
+            guard !activeStrokePoints.isEmpty else {
+                return
+            }
+            if activeStrokePoints.last != end {
+                activeStrokePoints.append(end)
+            }
+            annotations.append(
+                .highlighter(
+                    HighlighterAnnotation(
+                        points: activeStrokePoints,
+                        color: highlighterRGBAColor,
+                        normalizedLineWidth: normalizedHighlighterLineWidth(for: imageRect)
                     )
                 )
             )
@@ -183,8 +223,18 @@ final class MarkupEditorViewModel: ObservableObject {
         RGBAColor(nsColor: NSColor(selectedColor))
     }
 
+    private var highlighterRGBAColor: RGBAColor {
+        var color = selectedRGBAColor
+        color.alpha = min(color.alpha, 0.35)
+        return color
+    }
+
     private func normalizedLineWidth(for imageRect: CGRect) -> CGFloat {
         lineWidth / max(imageRect.width, imageRect.height)
+    }
+
+    private func normalizedHighlighterLineWidth(for imageRect: CGRect) -> CGFloat {
+        (lineWidth * 2.2) / max(imageRect.width, imageRect.height)
     }
 
     private func normalizedPoint(from location: CGPoint, in imageRect: CGRect, clamped: Bool = false) -> NormalizedPoint? {
@@ -214,7 +264,7 @@ final class MarkupEditorViewModel: ObservableObject {
         guard
             constrainOrthogonal,
             let start = activeStartPoint,
-            selectedTool == .pen || selectedTool == .arrow
+            selectedTool == .pen || selectedTool == .highlighter || selectedTool == .arrow
         else {
             return point
         }
